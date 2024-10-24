@@ -1,0 +1,57 @@
+name: alist
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+jobs:
+  check_website:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check if website is online using curl
+      id: check_website
+      run: |
+        RESPONSE=$(curl -k -s -o /dev/null -w "%{http_code}" ${{ secrets.WEBSITE }} || echo "failed")
+
+        echo "HTTP response code: $RESPONSE"
+
+        if [ "$RESPONSE" == "200" ]; then
+          echo "Website is online."
+          echo "status=online" >> $GITHUB_ENV  # online
+        elif [ "$RESPONSE" == "failed" ]; then
+          echo "Failed to connect to the website. Curl returned an error."
+          echo "status=offline" >> $GITHUB_ENV  # offline
+        else
+          echo "Website returned a non-200 status code: $RESPONSE."
+          echo "status=offline" >> $GITHUB_ENV  # offline
+        fi
+
+    - name: Install SSH Client
+      if: env.status == 'offline'
+      run: sudo apt-get update && sudo apt-get install -y openssh-client sshpass
+
+    - name: Set SSH Port
+      if: env.status == 'offline'
+      run: |
+        if [ -z "${{ secrets.PORT }}" ]; then
+          echo "Using default SSH port 22"
+          echo "SSH_PORT=22" >> $GITHUB_ENV
+        else
+          echo "Using custom SSH port ${{ secrets.PORT }}"
+          echo "SSH_PORT=${{ secrets.PORT }}" >> $GITHUB_ENV
+        fi
+
+    - name: SSH into server and restart service
+      if: env.status == 'offline'
+      run: |
+        sshpass -p '${{ secrets.PASSWORD }}' ssh -p $SSH_PORT -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.SERVER }} << 'EOF'
+          if [ -z "${{ secrets.SCRIPT }}" ]; then
+            echo "SCRIPT variable is not set. Skipping..."
+          else
+            echo "SCRIPT variable is set. Executing script..."
+            ${{ secrets.SCRIPT }}
+          fi
+          exit
+        EOF
