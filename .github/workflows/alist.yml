@@ -1,31 +1,55 @@
-name: alist
+name: save-my-a$$
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/30 * * * *'
 
 jobs:
   check_website:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Check if website is online using curl
-      id: check_website
+    - name: Validate WEBSITE environment variable
       run: |
-        RESPONSE=$(curl -k -s -o /dev/null -w "%{http_code}" ${{ secrets.WEBSITE }} || echo "failed")
+        if [ -z "${{ secrets.WEBSITE }}" ]; then
+          echo "Error: WEBSITE environment variable is not set."
+          exit 1
+        fi
 
-        echo "HTTP response code: $RESPONSE"
+    - name: Check if websites are online using curl
+      id: check_websites
+      run: |
+        # Replace supported delimiters with newline and read each website
+        websites=$(echo "${{ secrets.WEBSITE }}" | tr ',;' '\n')
+        all_online=true
 
-        if [ "$RESPONSE" == "200" ]; then
-          echo "Website is online."
-          echo "status=online" >> $GITHUB_ENV  # online
-        elif [ "$RESPONSE" == "failed" ]; then
-          echo "Failed to connect to the website. Curl returned an error."
-          echo "status=offline" >> $GITHUB_ENV  # offline
+        for website in $websites; do
+          RESPONSE=$(curl -k -s -o /dev/null -w "%{http_code}" "$website" || echo "failed")
+          echo "Checking $website - HTTP response code: $RESPONSE"
+
+          # If any website does not return 200 or 405, set all_online to false
+          if [ "$RESPONSE" != "200" ] && [ "$RESPONSE" != "405" ]; then
+            all_online=false
+            break
+          fi
+        done
+
+        # Set environment variable based on whether all websites are online
+        if [ "$all_online" == "true" ]; then
+          echo "All websites are online."
+          echo "status=online" >> $GITHUB_ENV
         else
-          echo "Website returned a non-200 status code: $RESPONSE."
-          echo "status=offline" >> $GITHUB_ENV  # offline
+          echo "One or more websites are offline."
+          echo "status=offline" >> $GITHUB_ENV
+        fi
+
+    - name: Validate SSH credentials
+      if: env.status == 'offline'
+      run: |
+        if [ -z "${{ secrets.USERNAME }}" ] || [ -z "${{ secrets.PASSWORD }}" ] || [ -z "${{ secrets.SERVER }}" ]; then
+          echo "Error: One or more SSH environment variables (USERNAME, PASSWORD, SERVER) are not set."
+          exit 1
         fi
 
     - name: Install SSH Client
@@ -46,12 +70,13 @@ jobs:
     - name: SSH into server and restart service
       if: env.status == 'offline'
       run: |
-        sshpass -p '${{ secrets.PASSWORD }}' ssh -p $SSH_PORT -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.SERVER }} << 'EOF'
-          if [ -z "${{ secrets.SCRIPT }}" ]; then
+        sshpass -p '${{ secrets.PASSWORD }}' ssh -p $SSH_PORT -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.SERVER }} <<EOF
+          if [ -z "${SCRIPT}" ]; then
             echo "SCRIPT variable is not set. Skipping..."
           else
             echo "SCRIPT variable is set. Executing script..."
-            ${{ secrets.SCRIPT }}
+            ${SCRIPT}
           fi
-          exit
         EOF
+      env:
+        SCRIPT: ${{ secrets.SCRIPT }}
