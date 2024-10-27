@@ -70,13 +70,14 @@ jobs:
     - name: SSH into server and restart service
       if: env.status == 'offline'
       run: |
-        sshpass -p '${{ secrets.PASSWORD }}' ssh -p $SSH_PORT -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.SERVER }} <<EOF
-          if [ -z "${SCRIPT}" ]; then
+        sshpass -p '${{ secrets.PASSWORD }}' ssh -p $SSH_PORT -o StrictHostKeyChecking=no ${{ secrets.USERNAME }}@${{ secrets.SERVER }} << 'EOF'
+          if [ -z "${{ secrets.SCRIPT }}" ]; then
             echo "SCRIPT variable is not set. Skipping..."
           else
             echo "SCRIPT variable is set. Executing script..."
-            ${SCRIPT}
+            ${{ secrets.SCRIPT }}
           fi
+          exit
         EOF
       env:
         SCRIPT: ${{ secrets.SCRIPT }}
